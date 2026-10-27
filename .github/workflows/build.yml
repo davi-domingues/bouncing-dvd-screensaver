@@ -1,0 +1,60 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify vendored WebView2 binaries against NuGet
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '1.0.2903.40'
+          $expectedPackageHash = 'EF128016DD1E51C59178C827ED5B8AA3322C57AFA8675D930F8109505542AD74'
+          $pkg = Join-Path $env:RUNNER_TEMP 'webview2.zip'
+          $dir = Join-Path $env:RUNNER_TEMP 'webview2'
+          Invoke-WebRequest "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/$version" -OutFile $pkg
+          $hash = (Get-FileHash $pkg -Algorithm SHA256).Hash
+          if ($hash -ne $expectedPackageHash) { throw "NuGet package hash mismatch: $hash" }
+          Expand-Archive $pkg $dir
+          $map = @{
+            'Microsoft.Web.WebView2.Core.dll'     = 'lib/net462/Microsoft.Web.WebView2.Core.dll'
+            'Microsoft.Web.WebView2.WinForms.dll' = 'lib/net462/Microsoft.Web.WebView2.WinForms.dll'
+            'WebView2Loader.dll'                  = 'runtimes/win-x64/native/WebView2Loader.dll'
+            'WebView2-LICENSE.txt'                = 'LICENSE.txt'
+          }
+          foreach ($name in $map.Keys) {
+            $vendored = (Get-FileHash (Join-Path 'lib' $name)).Hash
+            $official = (Get-FileHash (Join-Path $dir $map[$name])).Hash
+            if ($vendored -ne $official) { throw "lib/$name does not match the official package." }
+            Write-Host "OK  lib/$name  $vendored"
+          }
+
+      - name: Build
+        shell: powershell
+        run: .\build.ps1
+
+      - name: Check scripts parse
+        shell: powershell
+        run: |
+          foreach ($f in 'build.ps1', 'install.ps1', 'uninstall.ps1') {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$errors)
+            if ($errors) { $errors | ForEach-Object { Write-Error "${f}: $($_.Message)" }; exit 1 }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bouncing-dvd-screensaver-win-x64
+          path: dist/
+          if-no-files-found: error

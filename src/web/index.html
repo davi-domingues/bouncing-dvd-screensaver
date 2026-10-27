@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bouncing DVD Screensaver</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; cursor: none; }
+  #player { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border: 0; pointer-events: none; }
+  /* Layer above the video: captures the mouse and hides the YouTube UI. */
+  #capture { position: fixed; inset: 0; z-index: 2; background: transparent; transition: background .4s; }
+  /* Software dimming fallback when hardware brightness is not available. */
+  body.dim #capture { background: rgba(0, 0, 0, .85); }
+</style>
+</head>
+<body>
+<div id="player"></div>
+<div id="capture"></div>
+<script>
+  var DEFAULT_VIDEO = '5mGuCdlCcNM';
+  var requested = new URLSearchParams(location.search).get('v') || '';
+  var VIDEO = /^[A-Za-z0-9_-]{11}$/.test(requested) ? requested : DEFAULT_VIDEO;
+
+  function send(message) {
+    if (window.chrome && chrome.webview) chrome.webview.postMessage(message);
+  }
+
+  // Scale the 16:9 video to cover the whole screen, without black bars.
+  function fit() {
+    var el = document.getElementById('player');
+    var w = innerWidth, h = innerHeight;
+    if (w / h > 16 / 9) h = w * 9 / 16; else w = h * 16 / 9;
+    el.style.width = Math.ceil(w) + 'px';
+    el.style.height = Math.ceil(h) + 'px';
+  }
+  addEventListener('resize', fit);
+
+  var player;
+  function onYouTubeIframeAPIReady() {
+    player = new YT.Player('player', {
+      videoId: VIDEO,
+      host: 'https://www.youtube-nocookie.com',
+      playerVars: {
+        autoplay: 1, mute: 1, controls: 0, disablekb: 1, fs: 0, rel: 0,
+        iv_load_policy: 3, modestbranding: 1, playsinline: 1,
+        loop: 1, playlist: VIDEO, origin: location.origin
+      },
+      events: {
+        onReady: function (e) {
+          fit();
+          e.target.mute();
+          e.target.setPlaybackQuality('hd1080');
+          e.target.playVideo();
+        },
+        onStateChange: function (e) {
+          // Loop forever and never stay paused.
+          if (e.data === YT.PlayerState.ENDED) { player.seekTo(0); player.playVideo(); }
+          if (e.data === YT.PlayerState.PAUSED) player.playVideo();
+        }
+      }
+    });
+    fit();
+  }
+
+  document.addEventListener('mousemove', function (e) {
+    if (e.movementX || e.movementY) send('activity');
+  });
+  document.addEventListener('mousedown', function () { send('activity'); });
+  document.addEventListener('wheel', function () { send('activity'); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { e.preventDefault(); send('esc'); }
+  });
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+</script>
+<script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        shell: powershell
+        run: .\build.ps1
+
+      - name: Package
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          $zip = "bouncing-dvd-screensaver-$tag-win-x64.zip"
+          Compress-Archive -Path dist/* -DestinationPath $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zip" | Set-Content "$zip.sha256" -NoNewline
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+
+      - name: Extract release notes from CHANGELOG.md
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $lines = Get-Content CHANGELOG.md
+          $start = ($lines | Select-String -Pattern "^## \[$([regex]::Escape($version))\]").LineNumber
+          if (-not $start) { throw "No CHANGELOG.md entry for $version" }
+          $rest = $lines[$start..($lines.Count - 1)]
+          $end = ($rest | Select-String -Pattern '^## |^\[').LineNumber | Select-Object -First 1
+          $notes = if ($end) { $rest[0..($end - 2)] } else { $rest }
+          $notes += ''
+          $notes += '## Install'
+          $notes += ''
+          $notes += '1. Download the zip below and extract it.'
+          $notes += '2. Run `bouncing-dvd-screensaver.exe`, or `powershell -ExecutionPolicy Bypass -File .\install.ps1` for a Desktop shortcut and the `bouncing-dvd-screensaver` command.'
+          $notes += ''
+          $notes += 'Requires Windows 10/11 x64, .NET Framework 4.6.2+ and the WebView2 Runtime. Press ESC to exit.'
+          $notes | Set-Content release-notes.md
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = '${{ steps.package.outputs.zip }}'
+          gh release create $env:GITHUB_REF_NAME $zip "$zip.sha256" `
+            --title "Bouncing DVD Screensaver $env:GITHUB_REF_NAME" `
+            --notes-file release-notes.md `
+            --verify-tag

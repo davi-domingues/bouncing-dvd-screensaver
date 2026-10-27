@@ -1,0 +1,5 @@
+# Keep scripts and sources with LF in the repo; PowerShell and csc handle LF fine.
+* text=auto eol=lf
+*.dll binary
+*.exe binary
+*.png binary
